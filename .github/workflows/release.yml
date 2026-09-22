@@ -1,0 +1,56 @@
+name: Release (npm publish)
+
+# Owner-gated release pipeline. Publishing is irreversible (npm names are
+# claimed forever), so this workflow only ever runs after a manual dispatch
+# AND a manual approval on the protected `release` environment. Do not wire
+# this to automatic tag pushes until issue #10 in the main repo lands.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run (no actual publish)"
+        type: boolean
+        default: true
+      tag:
+        description: "npm dist-tag"
+        type: string
+        default: latest
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish @tracepath/* to npm
+    runs-on: ubuntu-latest
+    environment: release # requires manual approval in repo settings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Install dependencies
+        run: npm ci
+      - name: Build all packages
+        run: npm run build
+      - name: Publish (lockstep)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          ARGS=(--access public --tag "${{ inputs.tag }}")
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          for pkg in packages/*/; do
+            name=$(node -p "require('./${pkg}package.json').name")
+            private=$(node -p "require('./${pkg}package.json').private || false")
+            if [ "$private" = "true" ]; then
+              echo "skip private package $name"
+              continue
+            fi
+            echo "publishing $name"
+            npm publish "${ARGS[@]}" -w "$name"
+          done

@@ -113,6 +113,10 @@ Publishing is **not** automated from this repo yet. It happens from the main mon
 
 MIT — see [LICENSE](LICENSE). Upstream work © dusanstanojeviccs (Traceway).
 
+## Contributing
+
+`main` is protected: all changes go through pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Links
 
 - [TracePath](https://tracepath.dev) — main product site

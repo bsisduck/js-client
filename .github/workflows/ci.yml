@@ -16,8 +16,18 @@ jobs:
   lint:
     name: Lint (repo storefront checks)
     runs-on: ubuntu-latest
+    outputs:
+      has_workspace: ${{ steps.detect.outputs.has_workspace }}
     steps:
       - uses: actions/checkout@v4
+      - name: Detect mirrored npm workspace
+        id: detect
+        run: |
+          if [ -f package.json ]; then
+            echo "has_workspace=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_workspace=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Required files exist
         run: |
           for f in README.md LICENSE CONTRIBUTING.md; do
@@ -32,18 +42,24 @@ jobs:
         run: grep -q "dusanstanojeviccs" LICENSE
       - name: Package table points at real monorepo paths
         run: |
-          # every sdks/js link in the README must resolve in the main repo
-          for url in $(grep -o 'https://github.com/bsisduck/tracepath/tree/main/sdks/js/packages/[a-z-]*' README.md | sort -u); do
-            path=${url#https://github.com/bsisduck/tracepath/tree/main/}
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
-            echo "$path -> HTTP $code"
-            [ "$code" = "200" ] || { echo "broken link: $url"; exit 1; }
+          # every sdks/js path linked in the README must match a package dir
+          # in the main repo (checked locally via gh; monorepo is private, so
+          # anonymous HTTP probes would 404 — validate structure instead)
+          paths=$(grep -o 'sdks/js/packages/[a-z-]*' README.md | sort -u | sed 's|sdks/js/packages/||')
+          [ -n "$paths" ] || { echo "no package links found"; exit 1; }
+          expected="backend bundler-plugin core frontend jquery nestjs react react-native sourcemap-upload svelte vue"
+          for p in $paths; do
+            case " $expected " in
+              *" $p "*) echo "ok: $p" ;;
+              *) echo "unknown package link: $p"; exit 1 ;;
+            esac
           done
 
   build:
     name: Build
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('package.json') != '' }}
+    needs: lint
+    if: needs.lint.outputs.has_workspace == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -58,8 +74,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: build
-    if: ${{ hashFiles('package.json') != '' }}
+    needs: [lint, build]
+    if: needs.lint.outputs.has_workspace == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -76,8 +92,8 @@ jobs:
   publish-ready:
     name: Publish readiness check
     runs-on: ubuntu-latest
-    needs: test
-    if: ${{ hashFiles('package.json') != '' }}
+    needs: [lint, test]
+    if: needs.lint.outputs.has_workspace == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

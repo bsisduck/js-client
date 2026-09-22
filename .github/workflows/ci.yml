@@ -1,5 +1,9 @@
 name: CI
 
+# The SDK source of truth lives in sdks/js of bsisduck/tracepath. This repo
+# is the storefront + release CI. Once packages/ is mirrored here, the
+# build/test/publish-ready jobs run for real; until then they skip cleanly.
+
 on:
   push:
     branches: [main]
@@ -9,9 +13,37 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint (repo storefront checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required files exist
+        run: |
+          for f in README.md LICENSE CONTRIBUTING.md; do
+            test -s "$f" || { echo "missing or empty: $f"; exit 1; }
+          done
+      - name: README sanity (install cmd + ingest URL + license badge)
+        run: |
+          grep -q "npm install @tracepath/" README.md
+          grep -q "ingest.tracepath.dev" README.md
+          grep -q "badge/license-MIT" README.md
+      - name: LICENSE is MIT with upstream attribution
+        run: grep -q "dusanstanojeviccs" LICENSE
+      - name: Package table points at real monorepo paths
+        run: |
+          # every sdks/js link in the README must resolve in the main repo
+          for url in $(grep -o 'https://github.com/bsisduck/tracepath/tree/main/sdks/js/packages/[a-z-]*' README.md | sort -u); do
+            path=${url#https://github.com/bsisduck/tracepath/tree/main/}
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+            echo "$path -> HTTP $code"
+            [ "$code" = "200" ] || { echo "broken link: $url"; exit 1; }
+          done
+
   build:
     name: Build
     runs-on: ubuntu-latest
+    if: ${{ hashFiles('package.json') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,6 +59,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ hashFiles('package.json') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,6 +77,7 @@ jobs:
     name: Publish readiness check
     runs-on: ubuntu-latest
     needs: test
+    if: ${{ hashFiles('package.json') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
